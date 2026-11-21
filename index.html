@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cockpit">
+<meta name="theme-color" content="#04060b">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-180.png">
+<title>Cockpit</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #04060b; color: #e8f1f8;
+    font-family: -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif; -webkit-text-size-adjust: 100%; }
+  body { display: flex; align-items: center; justify-content: center;
+    padding: calc(24px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px)); }
+  main { width: 100%; max-width: 420px; text-align: center; }
+  .punkt { width: 56px; height: 56px; margin: 0 auto 28px; border-radius: 50%; border: 2px solid #5ee7ff;
+    box-shadow: 0 0 24px rgba(94, 231, 255, .35); animation: puls 1.8s ease-in-out infinite; }
+  @keyframes puls { 50% { opacity: .45; transform: scale(.92); } }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 12px; line-height: 1.3; }
+  p { font-size: 15px; line-height: 1.5; color: #7f93a6; margin: 0 0 16px; }
+  #schluessel { display: block; width: 100%; margin: 0 0 16px; padding: 14px; border-radius: 12px;
+    border: 1px solid rgba(94, 231, 255, .22); background: rgba(12, 19, 30, .92); color: #5ee7ff;
+    font: 13px/1.5 "SF Mono", Menlo, monospace; word-break: break-all; text-align: left;
+    -webkit-user-select: all; user-select: all; }
+  button { display: block; width: 100%; margin: 0 0 12px; padding: 14px; border-radius: 12px; border: 0;
+    background: #5ee7ff; color: #04060b; font: 600 16px -apple-system, "Helvetica Neue", sans-serif; }
+  button.leise { background: transparent; color: #7f93a6; border: 1px solid rgba(127, 147, 166, .35); font-weight: 500; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div class="punkt" id="punkt"></div>
+  <h1 id="titel">Einen Moment</h1>
+  <p id="text"></p>
+  <div id="schluesselblock" hidden>
+    <p id="hinweis"></p>
+    <div id="schluessel"></div>
+    <button id="kopieren" type="button">Kopieren</button>
+  </div>
+  <button id="hier" class="leise" type="button" hidden>Trotzdem hier im Browser nutzen</button>
+  <button id="neu" class="leise" type="button" hidden>Neu laden</button>
+</main>
+<script>
+(function () {
+  "use strict";
+  var el = function (id) { return document.getElementById(id); };
+  var INFO = new TextEncoder().encode("cockpit-v1");
+  var EINTRAG = 8 + 65 + 12 + 48;
+  var IOS = "standalone" in navigator;
+  var HOME = navigator.standalone === true;
+  var schluesselText = "";
+
+  function b64u(bytes) {
+    var s = "";
+    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  function zeige(titel, text, mitSchluessel) {
+    el("punkt").style.animation = "none";
+    el("titel").textContent = titel;
+    el("text").textContent = text || "";
+    el("neu").hidden = false;
+    var block = el("schluesselblock"), hier = el("hier");
+    block.hidden = true; hier.hidden = true;
+    if (!mitSchluessel) return;
+    if (IOS && !HOME) {
+      el("text").textContent = (text ? text + " " : "") +
+        "Erst zum Home-Bildschirm hinzufügen, dann dort öffnen und den Text kopieren. Das geht in Safari über Teilen.";
+      hier.hidden = false;
+      return;
+    }
+    zeigeSchluessel();
+  }
+
+  function zeigeSchluessel() {
+    el("hier").hidden = true;
+    el("hinweis").textContent = "Diesen Text an Jarvis schicken.";
+    el("schluessel").textContent = schluesselText;
+    el("schluesselblock").hidden = false;
+  }
+
+  el("hier").addEventListener("click", zeigeSchluessel);
+  el("neu").addEventListener("click", function () { location.reload(); });
+  el("kopieren").addEventListener("click", function () {
+    var knopf = el("kopieren");
+    var fertig = function () { knopf.textContent = "Kopiert"; setTimeout(function () { knopf.textContent = "Kopieren"; }, 2500); };
+    var ersatz = function () {
+      var r = document.createRange(); r.selectNodeContents(el("schluessel"));
+      var s = getSelection(); s.removeAllRanges(); s.addRange(r);
+      try { if (document.execCommand("copy")) fertig(); } catch (e) {}
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(schluesselText).then(fertig, ersatz);
+    else ersatz();
+  });
+
+  function speicher() {
+    return new Promise(function (ok, fehler) {
+      var r = indexedDB.open("cockpit", 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore("geraet"); };
+      r.onsuccess = function () { ok(r.result); };
+      r.onerror = function () { fehler(r.error); };
+    });
+  }
+  function lies(db) {
+    return new Promise(function (ok, fehler) {
+      var r = db.transaction("geraet").objectStore("geraet").get("paar");
+      r.onsuccess = function () { ok(r.result); };
+      r.onerror = function () { fehler(r.error); };
+    });
+  }
+  function schreib(db, wert) {
+    return new Promise(function (ok, fehler) {
+      var t = db.transaction("geraet", "readwrite");
+      t.objectStore("geraet").put(wert, "paar");
+      t.oncomplete = function () { ok(); };
+      t.onerror = t.onabort = function () { fehler(t.error); };
+    });
+  }
+
+  async function geraet() {
+    var db = await speicher();
+    var paar = await lies(db);
+    if (!paar) {
+      // Privater Schlüssel nicht exportierbar, er verlässt das Gerät nie
+      var neu = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
+      var roh = new Uint8Array(await crypto.subtle.exportKey("raw", neu.publicKey));
+      paar = { privat: neu.privateKey, oeffentlich: roh };
+      await schreib(db, paar);
+    }
+    if (navigator.storage && navigator.storage.persist) { try { navigator.storage.persist(); } catch (e) {} }
+    return paar;
+  }
+
+  async function entschluesseln(daten, paar) {
+    var b = new Uint8Array(daten);
+    if (b.length < 5 || b[0] !== 74 || b[1] !== 67 || b[2] !== 49 || b[3] !== 1) throw new Error("format");
+    var n = b[4], kopfEnde = 5 + n * EINTRAG;
+    if (b.length < kopfEnde + 12 + 16) throw new Error("format");
+    var kennung = new Uint8Array(await crypto.subtle.digest("SHA-256", paar.oeffentlich)).slice(0, 8);
+    var treffer = -1;
+    for (var i = 0; i < n && treffer < 0; i++) {
+      var p = 5 + i * EINTRAG, gleich = true;
+      for (var j = 0; j < 8; j++) if (b[p + j] !== kennung[j]) gleich = false;
+      if (gleich) treffer = p;
+    }
+    if (treffer < 0) return null;
+    var einmal = b.slice(treffer + 8, treffer + 73);
+    var iv = b.slice(treffer + 73, treffer + 85);
+    var verpackt = b.slice(treffer + 85, treffer + 133);
+    var fremd = await crypto.subtle.importKey("raw", einmal, { name: "ECDH", namedCurve: "P-256" }, false, []);
+    var geheim = await crypto.subtle.deriveBits({ name: "ECDH", public: fremd }, paar.privat, 256);
+    var salz = new Uint8Array(130); salz.set(einmal, 0); salz.set(paar.oeffentlich, 65);
+    var basis = await crypto.subtle.importKey("raw", geheim, "HKDF", false, ["deriveKey"]);
+    var kek = await crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt: salz, info: INFO }, basis,
+      { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+    var roh = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv, additionalData: kennung }, kek, verpackt);
+    var inhaltKey = await crypto.subtle.importKey("raw", roh, "AES-GCM", false, ["decrypt"]);
+    var klar = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: b.slice(kopfEnde, kopfEnde + 12), additionalData: b.slice(0, kopfEnde) },
+      inhaltKey, b.slice(kopfEnde + 12));
+    return new TextDecoder("utf-8").decode(klar);
+  }
+
+  var KOPF = '<!doctype html><html lang="de"><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">' +
+    '<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">' +
+    '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">' +
+    '<meta name="apple-mobile-web-app-title" content="Cockpit"><meta name="theme-color" content="#04060b">' +
+    '<meta name="referrer" content="no-referrer"><link rel="manifest" href="manifest.webmanifest">' +
+    '<link rel="apple-touch-icon" href="icon-180.png"></head>';
+  // Kommt die Webapp nach längerer Zeit wieder nach vorn, lädt sie den neuen Stand
+  var FRISCH = '<script>(function(){var weg=0;document.addEventListener("visibilitychange",function(){' +
+    'if(document.hidden){weg=Date.now();return;}if(weg&&Date.now()-weg>20*60*1000)location.reload();});})();<\/script>';
+
+  async function start() {
+    if (!window.crypto || !crypto.subtle || !window.indexedDB) {
+      zeige("Dieser Browser kann die Seite nicht öffnen", "", false); return;
+    }
+    var paar;
+    try { paar = await geraet(); }
+    catch (e) { zeige("Dieser Browser kann die Seite nicht öffnen", "Der Speicher des Geräts ist gesperrt, etwa im privaten Modus.", false); return; }
+    schluesselText = b64u(paar.oeffentlich);
+
+    var antwort;
+    try { antwort = await fetch("cockpit.enc?t=" + Date.now(), { cache: "no-store" }); }
+    catch (e) { zeige("Keine Verbindung", "Bitte später neu laden.", false); return; }
+    if (antwort.status === 404) { zeige("Dieses Gerät ist nicht eingetragen", "Es liegt noch kein Bericht vor.", true); return; }
+    if (!antwort.ok) { zeige("Der Bericht ist gerade nicht erreichbar", "Bitte später neu laden.", false); return; }
+
+    var seite;
+    try { seite = await entschluesseln(await antwort.arrayBuffer(), paar); }
+    catch (e) { zeige("Der Bericht lässt sich auf diesem Gerät nicht öffnen", "", true); return; }
+    if (seite === null) { zeige("Dieses Gerät ist nicht eingetragen", "", true); return; }
+
+    document.open();
+    document.write(KOPF + seite + FRISCH);
+    document.close();
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>
